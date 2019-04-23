@@ -1,4 +1,6 @@
 use std::fmt;
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::cmp::Eq;
 use std::cmp::PartialEq;
 
@@ -14,6 +16,15 @@ struct Node {
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 struct Edge(Node, Node);
+
+fn contained_in(n: &Node, v: &VecDeque<Node>) -> bool {
+    for i in 0..v.len() {
+        if n == &v[i] {
+            return true;
+        }
+    }
+    false
+}
 
 struct Graph {
     nodes: Vec<Node>,
@@ -56,7 +67,23 @@ impl Graph {
     fn new() -> Graph {
         Graph { edges: vec![], nodes: vec![] }
     }
-    
+
+    fn neighbors_of(&self, n: Node) -> Vec<Node> {
+        let mut neighbors = vec![];
+        for i in 0..self.nodes.len() {
+            let node = &self.nodes[i];
+
+            if node.c == n.c {
+                let vertical_neighbor = (n.x == node.x) && (n.y - node.y).abs() == 1;
+                let horizontal_neighbor = (n.y == node.y) && (n.x - node.x).abs() == 1;
+                if vertical_neighbor || horizontal_neighbor {
+                    neighbors.push(node.clone());
+                }
+            }
+        }
+        neighbors
+    }
+
     fn add_node(&mut self, node: (i16, i16), color: Color) {
         let mut to_add_node = true;
         let mut to_add_edge = false;
@@ -66,7 +93,7 @@ impl Graph {
             let is_dupe = n.x == node.0 && n.y == node.1;
             if is_dupe {
                 to_add_node = false;
-                return 
+                return
             }
 
             if n.c == color {
@@ -87,8 +114,37 @@ impl Graph {
                 self.edges.push(Edge(a, neighbors[i].clone()));
             }
         }
-
     }
+
+    fn find_component_containing(&mut self, u: Node) -> HashSet<Node> {
+        // compute connected components and capture any with no liberties
+        // use a breadth-first search from u
+        let mut reached: VecDeque<Node> = VecDeque::new();
+        let mut searched: HashSet<Node> = HashSet::new();
+
+        reached.push_back(u.clone());
+        searched.insert(u.clone());
+        while reached.len() > 0 {
+            let option_v = reached.pop_front();
+            match option_v {
+                Some(v) => {
+                    // neighbors of v not in (S U R) add to R
+                    if !searched.contains(&v) && !contained_in(&v, &reached) {
+                        reached.push_back(v.clone());
+                    }
+                    searched.insert(v);
+                },
+                None => { println!("reached set is full"); }
+            }
+        }
+        /* visit node x by adding to queue, search node by following
+         * neighbors until component is searched starting from x.
+         *
+         * compute non-adjacent spots "liberties"
+         */
+        searched
+    }
+
     fn add_node_black(&mut self, node: (i16, i16)) {
         self.add_node(node, Color::Black);
     }
@@ -148,6 +204,11 @@ fn main() {
     g.add_node_white((2,4));
     g.add_node_black((2,3));
     g.add_node_white((3,4));
+    g.add_node_black((4,4));
+    g.add_node_white((1,3));
+    g.add_node_black((3,3));
+    g.add_node_white((4,5));
+    g.add_node_black((4,3));
 
     println!("{}", g);
 }
@@ -174,4 +235,83 @@ fn add_node_increases_edge_count() {
     // check that duplicates are not added
     g.add_node_black((2,5));
     assert_eq!(1, g.edges.len());
+}
+
+#[test]
+fn capture_single_works() {
+    // capturing a single piece should work, assuming 22 is white
+    // and 12, 22, 32 and 32 are black, then the black pieces
+    // should capture the white 22 piece and remove it from the board.
+    let mut g = Graph::new();
+    /*
+     *     21
+     *  12 22 32
+     *     23
+     *
+     *
+     */
+    g.add_node_black((1,2));
+    g.add_node_black((2,1));
+    g.add_node_black((3,2));
+    g.add_node_black((2,3));
+    assert_eq!(4, g.nodes.len());
+    g.add_node_white((2,2));
+    //assert_eq!(4, g.nodes.len());
+}
+
+//#[test]
+fn find_component_doubleton() {
+    let mut g = Graph::new();
+    g.add_node_black((1,2));
+    g.add_node_white((5,5));
+    g.add_node_black((2,2));
+    let u = Node::new(1,2, Color::Black);
+    let u_component = g.find_component_containing(u);
+    assert_eq!(2, u_component.len());
+}
+
+#[test]
+fn contained_in_works() {
+    let mut s: VecDeque<Node> = VecDeque::new();
+    let n = Node::new(1,2,Color::Black);
+    assert_eq!(false, contained_in(&n, &s));
+    s.push_front(n.clone());
+    assert_eq!(true, contained_in(&n, &s));
+}
+
+#[test]
+fn neighbors_of_works() {
+    // capturing a single piece should work, assuming 22 is white
+    // and 12, 22, 32 and 32 are black, then the black pieces
+    // should capture the white 22 piece and remove it from the board.
+    let mut g = Graph::new();
+    /*
+     *   x 21
+     *  12 y 32
+     *     23
+     *
+     *
+     */
+    g.add_node_black((1,1));
+    g.add_node_white((2,2));
+    g.add_node_black((1,2));
+    g.add_node_white((2,3));
+    g.add_node_black((2,1));
+    g.add_node_white((3,2));
+
+    let x = Node::new(1,1,Color::Black);
+    let neighbors_x = g.neighbors_of(x);
+    let expected_neighbors_x = vec![
+        Node::new(1,2,Color::Black),
+        Node::new(2,1,Color::Black),
+    ];
+    assert_eq!(neighbors_x, expected_neighbors_x);
+
+    let y = Node::new(2,2,Color::White);
+    let neighbors_y = g.neighbors_of(y);
+    let eypected_neighbors_y = vec![
+        Node::new(2,3,Color::White),
+        Node::new(3,2,Color::White),
+    ];
+    assert_eq!(neighbors_y, eypected_neighbors_y);
 }
